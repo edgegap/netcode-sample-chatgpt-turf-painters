@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Turf Painters</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#10131b;color:#eef2ff;font:16px system-ui;display:flex;justify-content:center;min-height:100vh;padding:20px}
+main{width:min(980px,100%)}h1{margin:0 0 4px;font-size:clamp(24px,4vw,38px)}.sub{color:#aab3c7;margin-bottom:14px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:16px;align-items:start}.arena{background:#181e2a;border:1px solid #313b50;border-radius:14px;padding:10px;position:relative}canvas{width:100%;height:auto;display:block;border-radius:8px;background:#252b35;touch-action:none}
+.panel{background:#181e2a;border:1px solid #313b50;border-radius:14px;padding:14px}.timer{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums}.status{color:#b8c2d8;min-height:40px;margin:4px 0 12px}.scores{display:grid;gap:8px}.score{display:flex;align-items:center;justify-content:space-between;background:#222a38;padding:9px;border-radius:9px}.dot{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:8px}.score-name{display:flex;align-items:center}.btn{border:0;background:#5a77f5;color:white;padding:10px 14px;border-radius:9px;font-weight:700;cursor:pointer;width:100%;margin-top:12px}.btn:hover{filter:brightness(1.1)}.help{font-size:13px;color:#aab3c7;line-height:1.5;margin-top:14px}.keys{display:inline-block;border:1px solid #48536a;border-radius:4px;padding:1px 5px;color:#e8edff;margin:1px}
+@media(max-width:720px){.layout{grid-template-columns:1fr}.panel{order:2}.arena{order:1}.scores{grid-template-columns:1fr 1fr}}
+</style></head><body><main>
+<h1>🎨 Turf Painters</h1><div class="sub">Claim the floor. Bump rivals to splash their turf. 60 seconds.</div>
+<div class="layout"><div class="arena"><canvas id="game" width="800" height="800" aria-label="Turf Painters arena"></canvas></div>
+<aside class="panel"><div class="timer" id="timer">60.0</div><div class="status" id="status">Ready? Press Start!</div><div class="scores" id="scores"></div><button class="btn" id="restart">Start / Restart</button><div class="help"><b>Move:</b> <span class="keys">W</span><span class="keys">A</span><span class="keys">S</span><span class="keys">D</span> or arrow keys<br><br>Build momentum to bump opponents. Bumps splash a 3×3 paint zone around the painter who gets hit. Tiles count toward your score.<br><br>Colors: You · Bots</div></aside></div></main>
+<script>"use strict";
+/* RULES:BEGIN */
+function createWorld(){
+  const world={size:800,grid:20,tileSize:40,roundLength:60,time:60,players:[],tiles:Array(400).fill(-1),running:true,ended:false};
+  addPlayer(world,0,"You",false);addPlayer(world,1,"Bot Blue",true);addPlayer(world,2,"Bot Orange",true);addPlayer(world,3,"Bot Purple",true);
+  const starts=[[400,400],[130,130],[670,130],[670,670]];
+  world.players.forEach((p,i)=>{p.x=starts[i][0];p.y=starts[i][1];});
+  return world;
+}
+function addPlayer(world,id,name,isBot){
+  const colors=["#52e0a0","#5ba7ff","#ffad55","#b28cff"];
+  world.players.push({id,name,isBot,color:colors[id%colors.length],x:400,y:400,vx:0,vy:0,radius:14,alive:true,input:{up:false,down:false,left:false,right:false},botTarget:null,painted:0});
+  return world.players[world.players.length-1];
+}
+function removePlayer(world,id){world.players=world.players.filter(p=>p.id!==id);}
+function setInput(world,id,{up,down,left,right}){const p=world.players.find(p=>p.id===id);if(p&&!p.isBot)p.input={up:!!up,down:!!down,left:!!left,right:!!right};}
+function paintAt(world,p){const tx=Math.floor(p.x/world.tileSize),ty=Math.floor(p.y/world.tileSize);if(tx>=0&&tx<world.grid&&ty>=0&&ty<world.grid){world.tiles[ty*world.grid+tx]=p.id;}}
+function step(world,dt){const events=[];if(!world.running||world.ended)return events;dt=Math.min(dt,0.04);const accel=390,friction=Math.pow(0.84,dt*60),maxSpeed=245;
+  for(const p of world.players){const input=p.input;let ax=(input.right?1:0)-(input.left?1:0),ay=(input.down?1:0)-(input.up?1:0);if(ax&&ay){ax*=0.7071;ay*=0.7071;}p.vx+=ax*accel*dt;p.vy+=ay*accel*dt;p.vx*=friction;p.vy*=friction;const sp=Math.hypot(p.vx,p.vy);if(sp>maxSpeed){p.vx*=maxSpeed/sp;p.vy*=maxSpeed/sp;}p.x+=p.vx*dt;p.y+=p.vy*dt;
+    const pad=p.radius;p.x=Math.max(pad,Math.min(world.size-pad,p.x));p.y=Math.max(pad,Math.min(world.size-pad,p.y));paintAt(world,p);}
+  for(let i=0;i<world.players.length;i++)for(let j=i+1;j<world.players.length;j++){const a=world.players[i],b=world.players[j],dx=b.x-a.x,dy=b.y-a.y,dist=Math.hypot(dx,dy),min=a.radius+b.radius;if(dist<min&&dist>0){const nx=dx/dist,ny=dy/dist,overlap=min-dist;a.x-=nx*overlap*.5;a.y-=ny*overlap*.5;b.x+=nx*overlap*.5;b.y+=ny*overlap*.5;const rel=(a.vx-b.vx)*nx+(a.vy-b.vy)*ny;if(rel>0){a.vx-=nx*rel*.72;a.vy-=ny*rel*.72;b.vx+=nx*rel*.72;b.vy+=ny*rel*.72;}if(Math.abs(rel)>90){events.push({type:'bump',a:a.id,b:b.id});const hit=Math.abs(rel)>150?a:b,bumper=hit===a?b:a;const cx=Math.floor(hit.x/world.tileSize),cy=Math.floor(hit.y/world.tileSize);for(let ty=cy-1;ty<=cy+1;ty++)for(let tx=cx-1;tx<=cx+1;tx++)if(tx>=0&&tx<world.grid&&ty>=0&&ty<world.grid)world.tiles[ty*world.grid+tx]=bumper.id;}}
+  }
+  world.time=Math.max(0,world.time-dt);if(world.time<=0){world.running=false;world.ended=true;let counts=world.players.map(p=>({id:p.id,count:world.tiles.filter(t=>t===p.id).length}));counts.sort((a,b)=>b.count-a.count);events.push({type:'win',winner:counts[0].id});}return events;
+}
+function botInput(world,id){const p=world.players.find(q=>q.id===id);if(!p)return {up:false,down:false,left:false,right:false};let best=null,bestScore=-Infinity;
+  // Bots choose nearby unpainted/weakly-owned territory and occasionally seek rivals.
+  for(let ty=0;ty<world.grid;ty++)for(let tx=0;tx<world.grid;tx++){const x=(tx+.5)*world.tileSize,y=(ty+.5)*world.tileSize,owner=world.tiles[ty*world.grid+tx];let score=(owner===p.id?-8:owner===-1?8:3)-Math.hypot(x-p.x,y-p.y)*.018;if(score>bestScore){bestScore=score;best={x,y};}}
+  // Seek a rival when close enough to make a meaningful bump; otherwise prioritize territory.
+  const rival=world.players.filter(q=>q.id!==id).sort((a,b)=>Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];if(rival&&Math.hypot(rival.x-p.x,rival.y-p.y)<170)best={x:rival.x,y:rival.y};
+  const dx=(best?.x||p.x)-p.x,dy=(best?.y||p.y)-p.y;return {up:dy<-14,down:dy>14,left:dx<-14,right:dx>14};
+}
+/* RULES:END */
+
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),timerEl=document.getElementById('timer'),statusEl=document.getElementById('status'),scoresEl=document.getElementById('scores'),restartBtn=document.getElementById('restart');
+let world=createWorld(),last=0,keys={};
+const colors=world.players.map(p=>p.color);
+function draw(){ctx.clearRect(0,0,800,800);ctx.fillStyle="#252b35";ctx.fillRect(0,0,800,800);
+  for(let i=0;i<world.tiles.length;i++){let id=world.tiles[i];if(id>=0){ctx.fillStyle=colors[id];ctx.globalAlpha=.52;ctx.fillRect((i%20)*40,(Math.floor(i/20))*40,40,40);ctx.globalAlpha=1;}}
+  ctx.strokeStyle="#3b4352";ctx.lineWidth=1;for(let i=0;i<=20;i++){ctx.beginPath();ctx.moveTo(i*40,0);ctx.lineTo(i*40,800);ctx.stroke();ctx.beginPath();ctx.moveTo(0,i*40);ctx.lineTo(800,i*40);ctx.stroke();}
+  world.players.forEach(p=>{ctx.save();ctx.shadowColor=p.color;ctx.shadowBlur=18;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fill();ctx.restore();ctx.fillStyle="#111722";ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.fillText(p.id===0?"YOU":String(p.id),p.x,p.y+4);});
+  if(world.ended){ctx.fillStyle="rgba(8,10,15,.78)";ctx.fillRect(0,0,800,800);let sorted=world.players.map(p=>({p,count:world.tiles.filter(t=>t===p.id).length})).sort((a,b)=>b.count-a.count);ctx.textAlign="center";ctx.fillStyle="#fff";ctx.font="bold 54px system-ui";ctx.fillText(sorted[0].p.id===0?"YOU WIN!":"ROUND OVER",400,320);ctx.font="26px system-ui";ctx.fillText(sorted[0].p.name+" takes the turf!",400,370);ctx.font="20px system-ui";ctx.fillText("Press Start / Restart to play again",400,430);}
+}
+function refreshScores(){scoresEl.innerHTML="";world.players.forEach(p=>{const count=world.tiles.filter(t=>t===p.id).length;const div=document.createElement('div');div.className='score';div.innerHTML=`<span class="score-name"><span class="dot" style="background:${p.color}"></span>${p.name}</span><b>${count}</b>`;scoresEl.appendChild(div);});}
+function loop(ts){if(!last)last=ts;const dt=Math.min((ts-last)/1000,.04);last=ts;if(world.running){world.players.filter(p=>p.isBot).forEach(p=>setInput(world,p.id,botInput(world,p.id)));setInput(world,0,{up:keys.w||keys.arrowup,down:keys.s||keys.arrowdown,left:keys.a||keys.arrowleft,right:keys.d||keys.arrowright});step(world,dt);timerEl.textContent=world.time.toFixed(1);if(world.ended){const winner=world.players.find(p=>p.id===world.players.map(q=>({id:q.id,count:world.tiles.filter(t=>t===q.id).length})).sort((a,b)=>b.count-a.count)[0].id);statusEl.textContent=winner.name+" wins!";}}
+  draw();refreshScores();requestAnimationFrame(loop);}
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();keys[k]=true;});window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+restartBtn.addEventListener('click',()=>{world=createWorld();keys={};last=0;timerEl.textContent="60.0";statusEl.textContent="Paint as much turf as you can!";});requestAnimationFrame(loop);
+</script></body></html>

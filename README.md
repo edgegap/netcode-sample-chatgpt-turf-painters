@@ -327,3 +327,5 @@ npm run test:local    # rules in sync + two headless players play a full match
 
 Credits: game design, rules and renderer by ChatGPT (chatgpt.com); Edgegap integration from the
 Edgegap MCP skills (`edgegap-chat-canvas`, `edgegap-threejs`).
+
+License: MIT (see `LICENSE`).

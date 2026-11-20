@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Turf Painters</title>
+<!-- The Edgegap JS SDK (matchmaker client), pinned with an integrity hash. Added for online play. -->
+<script type="importmap">
+  {
+    "imports": {
+      "@edgegap/sdk": "https://cdn.jsdelivr.net/npm/@edgegap/sdk@1.1.0/dist/browser/edgegap.js"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/@edgegap/sdk@1.1.0/dist/browser/edgegap.js": "sha384-U8KQMl3e8xF4aAIJJMXV8IdkCKWiHSQhHISsedbG4z/L99dNOq5FoRlMgPDYgNUF"
+    }
+  }
+</script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#10131b;color:#eef2ff;font:16px system-ui;display:flex;justify-content:center;min-height:100vh;padding:20px}
+main{width:min(980px,100%)}h1{margin:0 0 4px;font-size:clamp(24px,4vw,38px)}.sub{color:#aab3c7;margin-bottom:14px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:16px;align-items:start}.arena{background:#181e2a;border:1px solid #313b50;border-radius:14px;padding:10px;position:relative}canvas{width:100%;height:auto;display:block;border-radius:8px;background:#252b35;touch-action:none}
+.panel{background:#181e2a;border:1px solid #313b50;border-radius:14px;padding:14px}.timer{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums}.status{color:#b8c2d8;min-height:40px;margin:4px 0 12px}.scores{display:grid;gap:8px}.score{display:flex;align-items:center;justify-content:space-between;background:#222a38;padding:9px;border-radius:9px}.dot{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:8px}.score-name{display:flex;align-items:center}.btn{border:0;background:#5a77f5;color:white;padding:10px 14px;border-radius:9px;font-weight:700;cursor:pointer;width:100%;margin-top:12px}.btn:hover{filter:brightness(1.1)}.help{font-size:13px;color:#aab3c7;line-height:1.5;margin-top:14px}.keys{display:inline-block;border:1px solid #48536a;border-radius:4px;padding:1px 5px;color:#e8edff;margin:1px}
+@media(max-width:720px){.layout{grid-template-columns:1fr}.panel{order:2}.arena{order:1}.scores{grid-template-columns:1fr 1fr}}
+/* Online buttons (added for Edgegap) */
+#find,#local,#cancel{background:transparent;box-shadow:inset 0 0 0 2px #5a77f5}.btn[hidden]{display:none}.btn:disabled{opacity:.5;cursor:default}
+</style></head><body><main>
+<h1>🎨 Turf Painters</h1><div class="sub">Claim the floor. Bump rivals to splash their turf. 60 seconds.</div>
+<div class="layout"><div class="arena"><canvas id="game" width="800" height="800" aria-label="Turf Painters arena"></canvas></div>
+<aside class="panel"><div class="timer" id="timer">60.0</div><div class="status" id="status">Ready? Press Start!</div><div class="scores" id="scores"></div><button class="btn" id="restart">Start / Restart</button><button class="btn" id="find">Find match</button><button class="btn" id="local" hidden>Local server :7777</button><button class="btn" id="cancel" hidden>Cancel</button><div class="help"><b>Move:</b> <span class="keys">W</span><span class="keys">A</span><span class="keys">S</span><span class="keys">D</span> or arrow keys<br><br>Build momentum to bump opponents. Bumps splash a 3×3 paint zone around the painter who gets hit. Tiles count toward your score.<br><br>Colors: You · Bots</div></aside></div></main>
+<script type="module">
+import { createWorld, addPlayer, removePlayer, setInput, paintAt, step, botInput } from "./rules.js";
+"use strict";
+/* rules: ./rules.js (generated from ../artifact/turf-painters.html) */
+import { LOCAL_PORT, autoplay, cancelMatchmaking, directServer, findMatch, joinServer, loadConfig } from "./online.js";
+
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),timerEl=document.getElementById('timer'),statusEl=document.getElementById('status'),scoresEl=document.getElementById('scores'),restartBtn=document.getElementById('restart');
+let HUMAN_ID="player";
+function newGame(){
+  const w=createWorld();
+  addPlayer(w,HUMAN_ID,"You",false);
+  addPlayer(w,"bot-blue","Bot Blue",true);
+  addPlayer(w,"bot-orange","Bot Orange",true);
+  addPlayer(w,"bot-purple","Bot Purple",true);
+  return w;
+}
+let world=newGame(),last=0,keys={};
+function draw(){ctx.clearRect(0,0,800,800);ctx.fillStyle="#252b35";ctx.fillRect(0,0,800,800);
+  for(let i=0;i<world.tiles.length;i++){let id=world.tiles[i];if(id!==null){const owner=world.players.find(p=>p.id===id);if(owner){ctx.fillStyle=owner.color;ctx.globalAlpha=.52;ctx.fillRect((i%20)*40,(Math.floor(i/20))*40,40,40);ctx.globalAlpha=1;}}}
+  ctx.strokeStyle="#3b4352";ctx.lineWidth=1;for(let i=0;i<=20;i++){ctx.beginPath();ctx.moveTo(i*40,0);ctx.lineTo(i*40,800);ctx.stroke();ctx.beginPath();ctx.moveTo(0,i*40);ctx.lineTo(800,i*40);ctx.stroke();}
+  world.players.forEach(p=>{ctx.save();ctx.shadowColor=p.color;ctx.shadowBlur=18;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);ctx.fill();ctx.restore();ctx.fillStyle="#111722";ctx.font="bold 11px system-ui";ctx.textAlign="center";ctx.fillText(p.id!==HUMAN_ID?String(p.name.replace(/^Bot /,"").slice(0,3)).toUpperCase():"YOU",p.x,p.y+4);});
+  if(world.ended){ctx.fillStyle="rgba(8,10,15,.78)";ctx.fillRect(0,0,800,800);let sorted=world.players.map(p=>({p,count:world.tiles.filter(t=>t===p.id).length})).sort((a,b)=>b.count-a.count);ctx.textAlign="center";ctx.fillStyle="#fff";ctx.font="bold 54px system-ui";ctx.fillText(sorted[0].p.id!==HUMAN_ID?"ROUND OVER":"YOU WIN!",400,320);ctx.font="26px system-ui";ctx.fillText(sorted[0].p.name+" takes the turf!",400,370);ctx.font="20px system-ui";ctx.fillText("Press Start / Restart to play again",400,430);}
+}
+function refreshScores(){scoresEl.innerHTML="";world.players.forEach(p=>{const count=world.tiles.filter(t=>t===p.id).length;const div=document.createElement('div');div.className='score';div.innerHTML=`<span class="score-name"><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</span><b>${count}</b>`;scoresEl.appendChild(div);});}
+function loop(ts){if(!last)last=ts;const dt=Math.min((ts-last)/1000,.04);last=ts;if(mode==="online"&&net)onlineFrame(dt);else if(world.running){world.players.filter(p=>p.isBot).forEach(p=>setInput(world,p.id,botInput(world,p.id)));setInput(world,HUMAN_ID,{up:keys.w||keys.arrowup,down:keys.s||keys.arrowdown,left:keys.a||keys.arrowleft,right:keys.d||keys.arrowright});step(world,dt);timerEl.textContent=world.time.toFixed(1);if(world.ended){const winner=world.players.find(p=>p.id===world.players.map(q=>({id:q.id,count:world.tiles.filter(t=>t===q.id).length})).sort((a,b)=>b.count-a.count)[0].id);statusEl.textContent=winner.name+" wins!";}}
+  draw();refreshScores();requestAnimationFrame(loop);}
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();keys[k]=true;});window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+restartBtn.addEventListener('click',()=>{if(net)return;mode="solo";HUMAN_ID="player";world=newGame();keys={};last=0;timerEl.textContent="60.0";statusEl.textContent="Paint as much turf as you can!";});requestAnimationFrame(loop);
+
+// ---- Online (added for Edgegap) ----
+// The server runs the same rules (./rules.js) and sends its world 20 times a second. This page sends
+// the four buttons, draws the server's world with the draw() above, and eases painters toward the
+// server's positions so 20 updates a second still look smooth.
+let mode="solo",net=null,phase=null;
+const myName="Painter"+Math.floor(Math.random()*900+100);
+const findBtn=document.getElementById('find'),localBtn=document.getElementById('local'),cancelBtn=document.getElementById('cancel');
+if(["localhost","127.0.0.1"].includes(location.hostname))localBtn.hidden=false;
+// Online, names come from other players: never put them in the page unescaped.
+function esc(s){return String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');}
+function setButtons(busy){[restartBtn,findBtn,localBtn].forEach(b=>b.disabled=busy);cancelBtn.hidden=!busy||mode==="online";}
+async function playOnline(how){
+  if(net)return;
+  setButtons(true);
+  try{
+    let url=how==="direct"?directServer:how==="local"?`ws://${location.hostname}:${LOCAL_PORT}`:null,ticket;
+    if(how==="find"){
+      const cfg=await loadConfig();
+      if(!cfg.matchmakerUrl||!cfg.matchmakerToken)throw new Error("No matchmaker set: fill in client/config.js, or add ?mm=<url>&token=<token> to the page URL");
+      const found=await findMatch(cfg,t=>statusEl.textContent=t);
+      url=found.url;ticket=found.ticketId;
+    }
+    statusEl.textContent="Connecting...";
+    net=await joinServer(url,myName,ticket,{onState:onServerState,onClose:onServerClose,onStatus:t=>statusEl.textContent=t});
+    mode="online";HUMAN_ID=net.myId;keys={};cancelBtn.hidden=true;
+  }catch(err){net=null;setButtons(false);statusEl.textContent=err?.message||"Could not find a match";}
+}
+function onServerState(msg){
+  const s=msg.s,prev={};
+  if(mode==="online")world.players.forEach(p=>prev[p.id]=p);
+  s.players.forEach(p=>{p.tx=p.x;p.ty=p.y;if(prev[p.id]){p.x=prev[p.id].x;p.y=prev[p.id].y;}});
+  world={size:800,grid:20,tileSize:40,roundLength:60,time:s.time,players:s.players,tiles:s.tiles,running:msg.phase==="playing",ended:msg.phase==="over"};
+  timerEl.textContent=msg.phase==="playing"?s.time.toFixed(1):msg.phase==="countdown"?`Starting in ${msg.timer}`:msg.phase==="over"?"0.0":"Waiting";
+  if(msg.phase==="waiting")statusEl.textContent=msg.waitingFor?`Waiting for ${msg.waitingFor} more player(s)...`:"Waiting for players, bots fill empty seats...";
+  else if(msg.phase==="countdown")statusEl.textContent="You are the painter marked YOU.";
+  else if(msg.phase==="playing")statusEl.textContent="Paint as much turf as you can!";
+  else if(msg.result)statusEl.textContent=msg.result.winner+" The server closes the match in a few seconds.";
+  phase=msg.phase;
+}
+function onlineFrame(dt){
+  net.sendInput({up:!!(keys.w||keys.arrowup),down:!!(keys.s||keys.arrowdown),left:!!(keys.a||keys.arrowleft),right:!!(keys.d||keys.arrowright)}); // throttled in online.js
+  const k=Math.min(1,dt*12);
+  world.players.forEach(p=>{if(p.tx===undefined)return;p.x+=(p.tx-p.x)*k;p.y+=(p.ty-p.y)*k;});
+}
+function onServerClose(){net=null;phase=null;mode="solo";HUMAN_ID="player";world=newGame();world.running=false;setButtons(false);timerEl.textContent="60.0";statusEl.textContent="Match over. Thanks for playing!";}
+findBtn.addEventListener('click',()=>playOnline("find"));
+localBtn.addEventListener('click',()=>playOnline("local"));
+cancelBtn.addEventListener('click',()=>cancelMatchmaking());
+// Close the socket when the tab goes away, so an empty server stops itself quickly.
+addEventListener('pagehide',()=>net?.close());
+// ?server=wss://<fqdn>:<port> joins one deployment directly; ?autoplay=1 clicks Find match.
+if(directServer)playOnline("direct");else if(autoplay==="1")playOnline("find");else if(autoplay==="local")playOnline("local");
+</script></body></html>
